@@ -1,51 +1,39 @@
 import asyncio
-import websockets
 from aiohttp import web
  
-client = None
+client_ws = None
  
-async def tunnel(ws):
-    global client
-    client = ws
-    print("Client connected")
+async def websocket_handler(request):
+    global client_ws
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
  
-    try:
-        await ws.wait_closed()
-    finally:
-        client = None
-        print("Client disconnected")
+    client_ws = ws
+    print("Tunnel client connected")
+ 
+    async for msg in ws:
+        pass
+ 
+    client_ws = None
+    print("Client disconnected")
+    return ws
  
 async def handle_http(request):
-    global client
+    global client_ws
  
-    if client is None:
+    if client_ws is None:
         return web.Response(text="No tunnel client connected")
  
-    data = {
-        "method": request.method,
-        "path": request.path_qs,
-    }
+    await client_ws.send_str(request.path)
  
-    await client.send(str(data))
-    response = await client.recv()
+    msg = await client_ws.receive()
  
-    return web.Response(text=response)
+    return web.Response(text=msg.data)
  
-async def main():
-    ws_server = await websockets.serve(tunnel, "0.0.0.0", 8765)
+app = web.Application()
+app.router.add_get("/ws", websocket_handler)
+app.router.add_route("*", "/{tail:.*}", handle_http)
  
-    app = web.Application()
-    app.router.add_route("*", "/{tail:.*}", handle_http)
+port = int(__import__("os").environ.get("PORT", 10000))
  
-    runner = web.AppRunner(app)
-    await runner.setup()
- 
-    port = int(__import__("os").environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
- 
-    print("Server running")
- 
-    await asyncio.Future()
- 
-asyncio.run(main())
+web.run_app(app, host="0.0.0.0", port=port)
